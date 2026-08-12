@@ -1,95 +1,91 @@
 # Log Ingestion and Query Service
 
-A high-performance structured log ingestion and query service built with TypeScript, Node.js, PostgreSQL, and Docker Compose.
+A structured log ingestion and query service built with TypeScript, Node.js, Fastify, PostgreSQL, and Docker Compose.
 
-The service accepts structured logs in batches, validates each entry independently, stores logs efficiently in PostgreSQL, supports flexible querying and aggregation, and applies a configurable data-retention policy.
+## Features
 
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Features](#features)
-- [Technology Stack](#technology-stack)
-- [Architecture](#architecture)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-- [Configuration](#configuration)
-- [API Documentation](#api-documentation)
-- [Database Design](#database-design)
-- [Attribute Storage Strategy](#attribute-storage-strategy)
-- [Index Design](#index-design)
-- [Cursor Pagination](#cursor-pagination)
-- [Retention Strategy](#retention-strategy)
-- [Validation](#validation)
-- [Performance Testing](#performance-testing)
-- [Query Performance](#query-performance)
-- [Testing](#testing)
-- [CI](#ci)
-- [Security](#security)
-- [Known Limitations](#known-limitations)
-- [Optional Features](#optional-features)
-- [Demo](#demo)
-- [Final Verification](#final-verification)
-
----
-
-# Overview
-
-This project implements a log ingestion and query service similar in concept to a simplified version of systems such as Datadog or Grafana Loki.
-
-The service is designed around three main concerns:
-
-1. **Ingestion**  
-   Accept structured logs individually or in batches, validate each entry, and store valid entries efficiently.
-
-2. **Querying**  
-   Search logs using multiple combinable filters and retrieve results using cursor-based pagination.
-
-3. **Aggregation**  
-   Aggregate logs into time buckets and optionally group them by service or log level.
-
-The system also implements configurable retention so that logs are not stored indefinitely.
-
-PostgreSQL is the source of truth for both reads and writes.
-
----
-
-# Features
-
-- Batch log ingestion
-- Per-entry validation
-- Partial batch acceptance
-- Invalid-entry rejection with index and reason
-- PostgreSQL persistence
-- JSONB attributes
-- Service filtering
-- Level filtering
-- Time-range filtering
-- Attribute filtering
-- Case-insensitive message search
+- Batch log ingestion with validation
+- PostgreSQL storage with JSONB attributes
+- Filtering by service, level, time, and attributes
+- Message search
 - Cursor-based pagination
-- Deterministic timestamp ordering
-- Time-bucketed aggregation
-- Aggregation grouped by service
-- Aggregation grouped by level
-- Configurable retention
-- Batched deletion of expired logs
-- Docker Compose deployment
-- Database migrations
-- Automated tests
-- Performance benchmarks
-- Query performance analysis with `EXPLAIN ANALYZE`
+- Log aggregation by time bucket
+- Grouping by service or level
+- Automatic log retention
+- Docker Compose support
 
----
+## API
 
-# Technology Stack
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/health` | Health check |
+| POST | `/logs` | Ingest logs |
+| GET | `/logs` | Query logs |
+| GET | `/logs/aggregate` | Aggregate logs |
 
-- **Language:** TypeScript
-- **Runtime:** Node.js
-- **Database:** PostgreSQL
-- **Containerization:** Docker
-- **Orchestration:** Docker Compose
-- **Data format:** JSON / JSONB
-- **Testing:** Project test suite
-- **Development:** `tsx`
+## Database
+
+The `logs` table contains:
+
+```text
+id, timestamp, level, service, message, attributes, created_at
+```
+
+`attributes` uses PostgreSQL `JSONB` for flexible log metadata.
+
+Indexes are used for:
+
+- Timestamp + ID
+- Service + timestamp
+- Level + timestamp
+- JSONB attributes
+- Message search
+
+## Pagination
+
+`GET /logs` uses cursor-based pagination with:
+
+```text
+timestamp DESC, id DESC
+```
+
+## Retention
+
+```env
+RETENTION_DAYS=30
+RETENTION_BATCH_SIZE=5000
+RETENTION_INTERVAL_MS=3600000
+```
+
+## Performance
+
+Tested with **100,000 logs**:
+
+```text
+Ingestion: 29,223 logs/sec
+
+Aggregation:
+p50: 22.63 ms
+p95: 66.47 ms
+p99: 92.55 ms
+```
+
+The aggregation p95 target is **< 1 second**.
+
+## Run
+
+```bash
+docker compose up --build
+```
+
+API:
+
+```text
+http://localhost:8080
+```
+
+## Author
+
+**Maha Azzouni**
+
+Boot.dev TypeScript Final Project — 2026

@@ -5,7 +5,9 @@ export const logSchema = z.object({
   level: z.enum(["debug", "info", "warn", "error"]),
   service: z.string().min(1),
   message: z.string().min(1),
+
   attributes: z.record(
+    z.string(),
     z.union([z.string(), z.number(), z.boolean()])
   ).default({}),
 });
@@ -68,8 +70,12 @@ export function parseQuery(query: any) {
     q: query.q,
     limit,
     cursor: query.cursor,
+
     attributes: Object.entries(query)
       .filter(([key]) => key.startsWith("attr."))
-      .map(([key, value]) => [key.slice(5), String(value)] as [string, string]),
+      .map(
+        ([key, value]) =>
+          [key.slice(5), String(value)] as [string, string]
+      ),
   };
 }

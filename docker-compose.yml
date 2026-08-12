@@ -1,91 +1,77 @@
-# Log Ingestion and Query Service
+services:
+  app:
+    build:
+      context: .
 
-A structured log ingestion and query service built with TypeScript, Node.js, Fastify, PostgreSQL, and Docker Compose.
+    container_name: log-ingestion-app
+    restart: unless-stopped
 
-## Features
+    environment:
+      PORT: 8080
 
-- Batch log ingestion with validation
-- PostgreSQL storage with JSONB attributes
-- Filtering by service, level, time, and attributes
-- Message search
-- Cursor-based pagination
-- Log aggregation by time bucket
-- Grouping by service or level
-- Automatic log retention
-- Docker Compose support
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-logs_db}
+      POSTGRES_USER: ${POSTGRES_USER:-logs_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-logs_password}
 
-## API
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| POST | `/logs` | Ingest logs |
-| GET | `/logs` | Query logs |
-| GET | `/logs/aggregate` | Aggregate logs |
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+      RETENTION_INTERVAL_MS: ${RETENTION_INTERVAL_MS:-3600000}
+      RETENTION_BATCH_SIZE: ${RETENTION_BATCH_SIZE:-5000}
 
-## Database
+    ports:
+      - "8080:8080"
 
-The `logs` table contains:
+    cpus: 0.5
+    mem_limit: 256m
 
-```text
-id, timestamp, level, service, message, attributes, created_at
-```
+    depends_on:
+      postgres:
+        condition: service_healthy
 
-`attributes` uses PostgreSQL `JSONB` for flexible log metadata.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:8080/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
-Indexes are used for:
+  postgres:
+    image: postgres:17
 
-- Timestamp + ID
-- Service + timestamp
-- Level + timestamp
-- JSONB attributes
-- Message search
+    container_name: log-ingestion-postgres
+    restart: unless-stopped
 
-## Pagination
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-logs_db}
+      POSTGRES_USER: ${POSTGRES_USER:-logs_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-logs_password}
 
-`GET /logs` uses cursor-based pagination with:
+    ports:
+      - "5432:5432"
 
-```text
-timestamp DESC, id DESC
-```
+    cpus: 1.0
+    mem_limit: 1g
 
-## Retention
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
-```env
-RETENTION_DAYS=30
-RETENTION_BATCH_SIZE=5000
-RETENTION_INTERVAL_MS=3600000
-```
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
-## Performance
-
-Tested with **100,000 logs**:
-
-```text
-Ingestion: 29,223 logs/sec
-
-Aggregation:
-p50: 22.63 ms
-p95: 66.47 ms
-p99: 92.55 ms
-```
-
-The aggregation p95 target is **< 1 second**.
-
-## Run
-
-```bash
-docker compose up --build
-```
-
-API:
-
-```text
-http://localhost:8080
-```
-
-## Author
-
-**Maha Azzouni**
-
-Boot.dev TypeScript Final Project — 2026
+volumes:
+  postgres_data:
