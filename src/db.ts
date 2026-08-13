@@ -7,7 +7,7 @@ export const db = new Pool({
   database: process.env.POSTGRES_DB ?? "logs_db",
   user: process.env.POSTGRES_USER ?? "logs_user",
   password: process.env.POSTGRES_PASSWORD ?? "logs_password",
-  max: 10,
+  max: Number(process.env.DB_POOL_MAX ?? 10),
 });
 
 export async function initDB() {
