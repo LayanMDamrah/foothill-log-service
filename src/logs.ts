@@ -54,14 +54,10 @@ function whereClause(filters: any, values: any[]) {
   }
 
   for (const [key, value] of filters.attributes) {
-    values.push(key);
-    const keyParam = `$${values.length}`;
-
-    values.push(value);
-    const valueParam = `$${values.length}`;
+    values.push(JSON.stringify({ [key]: value }));
 
     conditions.push(
-      `attributes ->> ${keyParam} = ${valueParam}`
+      `attributes @> $${values.length}::jsonb`
     );
   }
 
@@ -71,7 +67,16 @@ function whereClause(filters: any, values: any[]) {
         Buffer.from(filters.cursor, "base64url").toString()
       );
 
-      values.push(new Date(decoded.timestamp));
+      const timestamp = new Date(decoded.timestamp);
+
+      if (
+        Number.isNaN(timestamp.getTime()) ||
+        !decoded.id
+      ) {
+        throw new Error();
+      }
+
+      values.push(timestamp);
       const timeParam = `$${values.length}`;
 
       values.push(decoded.id);
@@ -95,6 +100,7 @@ export async function getLogs(filters: any) {
   const where = whereClause(filters, values);
 
   values.push(filters.limit + 1);
+  const limitParam = `$${values.length}`;
 
   const result = await db.query(
     `
@@ -108,13 +114,16 @@ export async function getLogs(filters: any) {
     FROM logs
     ${where}
     ORDER BY timestamp DESC, id DESC
-    LIMIT $${values.length}
+    LIMIT ${limitParam}
     `,
     values
   );
 
   const hasMore = result.rows.length > filters.limit;
-  const logs = result.rows.slice(0, filters.limit);
+
+  const logs = hasMore
+    ? result.rows.slice(0, filters.limit)
+    : result.rows;
 
   let next_cursor = null;
 
@@ -136,29 +145,34 @@ export async function getLogs(filters: any) {
 }
 
 export async function aggregateLogs(filters: any) {
-  const intervals: any = {
+  const intervals: Record<string, string> = {
     "1m": "1 minute",
     "5m": "5 minutes",
     "1h": "1 hour",
     "1d": "1 day",
   };
 
-  if (!intervals[filters.bucket]) {
+  const interval = intervals[filters.bucket];
+
+  if (!interval) {
     throw new Error("invalid bucket");
   }
 
   const values: any[] = [];
   const where = whereClause(filters, values);
 
-  values.push(intervals[filters.bucket]);
+  values.push(interval);
   const intervalParam = `$${values.length}`;
 
-  const group =
-    filters.group_by === "service"
-      ? "service"
-      : filters.group_by === "level"
-        ? "level"
-        : "NULL";
+  let group = "NULL";
+
+  if (filters.group_by === "service") {
+    group = "service";
+  } else if (filters.group_by === "level") {
+    group = "level";
+  } else if (filters.group_by) {
+    throw new Error("invalid group_by");
+  }
 
   const result = await db.query(
     `
@@ -207,9 +221,11 @@ export async function deleteOldLogs() {
       [days, batchSize]
     );
 
-    total += result.rowCount ?? 0;
+    const deleted = result.rowCount ?? 0;
 
-    if ((result.rowCount ?? 0) < batchSize) {
+    total += deleted;
+
+    if (deleted < batchSize) {
       break;
     }
   }
