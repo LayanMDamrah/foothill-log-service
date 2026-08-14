@@ -39,8 +39,14 @@ services:
       retries: 10
       start_period: 10s
 
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
   postgres:
-    image: postgres:17
+    image: postgres:16-alpine
 
     container_name: log-ingestion-postgres
     restart: unless-stopped
@@ -49,6 +55,17 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-logs_db}
       POSTGRES_USER: ${POSTGRES_USER:-logs_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-logs_password}
+
+    command:
+      - postgres
+      - -c
+      - synchronous_commit=off
+      - -c
+      - checkpoint_timeout=600s
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - timezone=UTC
 
     ports:
       - "5432:5432"
@@ -66,6 +83,12 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
 
 volumes:
   postgres_data:

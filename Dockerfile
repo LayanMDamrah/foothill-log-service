@@ -1,27 +1,30 @@
-FROM node:22-alpine AS build
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY tsconfig.json ./
-COPY src ./src
+COPY src/ ./src/
 
 RUN npm run build
 
 
-FROM node:22-alpine
+FROM node:22-alpine AS production
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci --omit=dev
+ENV NODE_ENV=production
 
-COPY --from=build /app/dist ./dist
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+COPY --from=builder /app/dist ./dist
 
 USER node
 
 EXPOSE 8080
 
-CMD ["node", "dist/server.js"]
+ENTRYPOINT ["node"]
+CMD ["dist/server.js"]

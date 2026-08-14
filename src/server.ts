@@ -12,6 +12,7 @@ import {
   requestSchema,
   validateTimestamp,
   parseQuery,
+  parseAggregateQuery,
 } from "./validation.js";
 
 import {
@@ -27,17 +28,20 @@ const app = Fastify({
 });
 
 let ready = false;
+let retentionTimer: NodeJS.Timeout | undefined;
 
 /* HEALTH */
 
-app.get("/health", async (_, reply) => {
+app.get("/health", async (_request, reply) => {
   if (!ready) {
     return reply
       .status(503)
       .send({ status: "starting" });
   }
 
-  return { status: "ok" };
+  return reply
+    .status(200)
+    .send({ status: "ok" });
 });
 
 /* POST /logs */
@@ -46,8 +50,14 @@ app.post("/logs", async (request, reply) => {
   try {
     const body = requestSchema.parse(request.body);
 
-    const valid: any[] = [];
-    const rejected: any[] = [];
+    const valid: Array<
+      ReturnType<typeof logSchema.parse>
+    > = [];
+
+    const rejected: Array<{
+      index: number;
+      reason: string;
+    }> = [];
 
     body.logs.forEach((log, index) => {
       const result = logSchema.safeParse(log);
@@ -55,38 +65,38 @@ app.post("/logs", async (request, reply) => {
       if (!result.success) {
         rejected.push({
           index,
-          reason: result.error.issues[0].message,
+          reason: result.error.issues[0]?.message ?? "invalid log",
         });
+
         return;
       }
 
-      const timestampError =
-        validateTimestamp(result.data.timestamp);
+      const timestampError = validateTimestamp(
+        result.data.timestamp,
+      );
 
       if (timestampError) {
         rejected.push({
           index,
           reason: timestampError,
         });
+
         return;
       }
 
       valid.push(result.data);
     });
 
-    if (valid.length) {
+    if (valid.length > 0) {
       await insertLogs(valid);
     }
 
-    const result = {
-      accepted: valid.length,
-      rejected,
-    };
-
     return reply
-      .status(valid.length ? 200 : 400)
-      .send(result);
-
+      .status(valid.length > 0 ? 200 : 400)
+      .send({
+        accepted: valid.length,
+        rejected,
+      });
   } catch {
     return reply
       .status(400)
@@ -100,10 +110,11 @@ app.post("/logs", async (request, reply) => {
 
 app.get("/logs", async (request, reply) => {
   try {
-    const filters = parseQuery(request.query);
+    const filters = parseQuery(
+      request.query as Record<string, unknown>,
+    );
 
     return await getLogs(filters);
-
   } catch (error) {
     return reply
       .status(400)
@@ -122,25 +133,15 @@ app.get(
   "/logs/aggregate",
   async (request, reply) => {
     try {
-      const query: any = request.query;
+      const params = parseAggregateQuery(
+        request.query as Record<string, unknown>,
+      );
 
-      if (!query.since || !query.until) {
-        throw new Error(
-          "since and until are required"
-        );
-      }
+      const buckets = await aggregateLogs(params);
 
-      const filters = {
-        ...parseQuery(query),
-        bucket: query.bucket ?? "1h",
-        group_by: query.group_by,
-      };
-
-      return {
-        buckets:
-          await aggregateLogs(filters),
-      };
-
+      return reply
+        .status(200)
+        .send({ buckets });
     } catch (error) {
       return reply
         .status(400)
@@ -151,12 +152,12 @@ app.get(
               : "invalid query",
         });
     }
-  }
+  },
 );
 
 /* START */
 
-async function start() {
+async function start(): Promise<void> {
   try {
     await initDB();
 
@@ -169,10 +170,10 @@ async function start() {
 
     const interval = Number(
       process.env.RETENTION_INTERVAL_MS ??
-      60 * 60 * 1000
+        60 * 60 * 1000,
     );
 
-    setInterval(async () => {
+    retentionTimer = setInterval(async () => {
       try {
         await deleteOldLogs();
       } catch (error) {
@@ -181,23 +182,35 @@ async function start() {
     }, interval);
 
     app.log.info(
-      "Log ingestion service is ready"
+      "Log ingestion service is ready",
     );
-
   } catch (error) {
     app.log.error(error);
     process.exit(1);
   }
 }
 
-process.on("SIGTERM", async () => {
+/* SHUTDOWN */
+
+async function shutdown(): Promise<void> {
+  if (retentionTimer) {
+    clearInterval(retentionTimer);
+  }
+
+  ready = false;
+
+  await app.close();
   await closeDB();
+
   process.exit(0);
+}
+
+process.on("SIGTERM", () => {
+  void shutdown();
 });
 
-process.on("SIGINT", async () => {
-  await closeDB();
-  process.exit(0);
+process.on("SIGINT", () => {
+  void shutdown();
 });
 
-start();
+void start();
